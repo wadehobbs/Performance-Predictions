@@ -5,6 +5,7 @@ library(tidyverse)
 library(DataExplorer)
 library(summarytools)
 library(lubridate)
+library(reshape2)
 
 #Couple of cool ways of seeing the data
 view(dfSummary(rowing_world_championships))     #Quick summary shown in html (webpage)
@@ -82,3 +83,31 @@ ggplot(filter(synek, variable == 'split_4_time'), aes(x = variable, y = value, g
 #From year - 2014 had the slowest and fastest times, slowest was quarter, fastest was final. Semi was also very quick that year 
 #Overall this is a good approach to zoom in on a single athlete in a single race but the dataset is much richer than this. 
 #Think of how to expand this type of exploration with the larger dataset. will depend on how melt performs. 
+
+
+#### Larger scale exploration of race results (splits) ####
+#Will recycle some of the above code applied to all races and athletes
+#Start again by looking at the one race type
+rowing_world_championships$row_id <- c(1:nrow(rowing_world_championships))
+rowing_world_championships$row_id <- as.factor(rowing_world_championships$row_id)
+mss <- filter(rowing_world_championships, event_category == "Men's Single Sculls")
+mss$race_date <- dmy(mss$race_date)
+mss <- arrange(mss, race_date) #Found data is pretty inconsequential outside of year so will only consider year
+mss$year <- year(mss$race_date)
+mss$year <- as.factor(mss$year)
+mss <- select(mss, -c(Year, lane_sl, event_cateogry_abbreviation, event_num, race_number, coxswain_birthday:third_name))
+data_melt <- melt(mss)
+melted_mss_splits <- filter(data_melt,variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+#plot
+ggplot(melted_mss_splits, aes(x = variable, y = value, group = row_id, colour = year)) +
+        geom_line()
+#check races per year
+table(melted_mss_splits$year)
+#Most races were in2015 but in plot are under the 2017 races so cant be seen. 2014 had the fewest but by far the largest spread
+#2014 looks to be the fastest but also close to the slowest year - large spread. 
+ggplot(filter(melted_mss_splits, variable == 'split_4_time'), aes(x = variable, y = value, group = row_id, colour = year)) +
+        geom_jitter(width = 0.1, size = 5, alpha = 0.5)
+#This plot gives a good sense of the spread of results, 2015 had very little spread, 2013 looked slower overall, 2015 and 17 had large spread.
+#This is probably all ill do on splits, time to move on to predictions. 
+
+
