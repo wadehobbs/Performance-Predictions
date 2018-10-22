@@ -1,0 +1,84 @@
+#Exploring large rowing data set
+rowing_world_championships <- read_csv("~/Dropbox/Personal/Jobs/Performance Predictions/rowing_world_championships.csv")
+
+library(tidyverse)
+library(DataExplorer)
+library(summarytools)
+library(lubridate)
+
+#Couple of cool ways of seeing the data
+view(dfSummary(rowing_world_championships))     #Quick summary shown in html (webpage)
+create_report(rowing_world_championships)       #Can be slow with large data set - didnt work
+
+#Explore
+#Want a reference id for each row (each row represents a run ie one athletes run in a race)
+rowing_world_championships$row_id <- c(1:nrow(rowing_world_championships))
+#Has to be a factor to act as a reference when the data is transformed (with melt)
+rowing_world_championships$row_id <- as.factor(rowing_world_championships$row_id)
+#Isolate one event to explore
+#Chose the men's single scull as it has the most entries
+mss <- filter(rowing_world_championships, event_category == "Men's Single Sculls")
+mss$race_date <- dmy(mss$race_date)
+mss <- arrange(mss, race_date)
+
+#Remove useless variables - note spelling mistake in 'event_cateogry_abbreviation'
+mss <- select(mss, -c(Year, lane_sl, event_cateogry_abbreviation, event_num, race_number, coxswain_birthday:third_name))
+#Melt data sample to plot race progress - dont like this as it turns date into one of the variables
+data_melt <- melt(mss)
+#Isolate 1 race
+race_1 <- filter(data_melt, race_id == 'ROM012901' & championship_name_description == 'Slovenia 28 Aug - 4 Sept 2011""')
+#Isolate the race splits
+race_1_splits <- filter(race_1, variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+#Plot Race 1 progression. Bit boring
+ggplot(race_1_splits, aes(x = variable, y = value, group = bow_name, colour = bow_name)) +
+    geom_line() #+ 
+    #theme(legend.position="none")
+#Look at one athlete over time
+synek <- filter(data_melt, bow_name == 'SYNEK Ondrej')
+synek <- filter(synek,variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+
+#Plot 1 athlete's progress over time - ie overlay all split progressions through all races in set
+ggplot(synek, aes(x = variable, y = value, group = row_id, colour = row_id)) +
+        geom_line()
+#Cool plot to show grouping of times based on round type (heat, quarter, semi or final)
+ggplot(synek, aes(x = variable, y = value, group = row_id, colour = round_type)) +
+        geom_line()
+#Interesting that the lines are so straight. Only a very slight kink at split 3. 
+#So to plot the race through checkpoints, need to create a run id (called row_id) then melt the data, then isolate the variable of interest
+#In this case it was splits, plotting the speed or stroke data would work too but more difficult to choose all the variables. 
+#Could use a call like 'starts_with' or something, then order in size to viz the speed at each 50m interval or stroke rate
+#Could viz stroke rate on y and speed on x. 
+#Ultimately I want to predict split time from the other variables, so i can manipulate stroke rate to see how it effects the split time 
+#Could start with average speed and stroke rate to predict split 4 and build from there. 
+#What other predictors would be useful? round_type (maybe a test to see if it is different), date? maybe time of year effects times. 
+#Even just plotting average times per month or something could be interesting. 
+
+#Ultimately build a shiny app that allows you to change stroke rate and speed (and date, round, anything else?)to see how it effects end result
+
+#Get a new variable called month
+mss$month <- month(mss$race_date)
+mss$month <- as.factor(mss$month)
+data_melt <- melt(mss)
+synek <- filter(data_melt, bow_name == 'SYNEK Ondrej')
+synek <- filter(synek,variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+ggplot(synek, aes(x = variable, y = value, group = row_id, colour = month)) +
+        geom_line()
+#Cool plot that shows there was a range of times across months (only 3 months in the set) but the majority of good times came in sept
+#while most of the slower times were in august. There was only 4 races in october so doesnt show up much. Although these are world champs itmes 
+#So presumably its peak  performance each race and round type is probably more telling.
+
+mss$year <- year(mss$race_date)
+mss$year <- as.factor(mss$year)
+#Confirms there are 16 races from each year, 2011, 2013, 2014, 2015, 2017. So looking at date is not a worthwhile thing to do. 
+data_melt <- melt(mss)
+synek <- filter(data_melt, bow_name == 'SYNEK Ondrej')
+synek <- filter(synek,variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+ggplot(synek, aes(x = variable, y = value, group = row_id, colour = year)) +
+        geom_line()
+#This makes for a more interesting date based analysis - how times change over the years. Also just focus in on the final time to see changes clearer
+ggplot(filter(synek, variable == 'split_4_time'), aes(x = variable, y = value, group = row_id, colour = year, shape = round_type)) +
+        geom_jitter(width = 0.02, size = 5)
+#Not quite as clear as id hope but shows finals are quicker - maybe too many splits (year and round type)
+#From year - 2014 had the slowest and fastest times, slowest was quarter, fastest was final. Semi was also very quick that year 
+#Overall this is a good approach to zoom in on a single athlete in a single race but the dataset is much richer than this. 
+#Think of how to expand this type of exploration with the larger dataset. will depend on how melt performs. 
