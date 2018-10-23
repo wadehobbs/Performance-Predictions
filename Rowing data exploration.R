@@ -128,13 +128,82 @@ ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, 
         geom_line()
 #Can see where the 'wrong' runs are comming in. Problem with viz is the 2017 values blocking everything else. 
 #fit a basic lm
-ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = year, colour = year)) +
+ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = team, colour = team)) +
         geom_jitter(alpha = 0.2) +
         geom_smooth(method = loess, size = 2) +
-        geom_text_repel(data = . %>% filter(x == max(x)), aes(x = x, y = y, label = group))
+        geom_text_repel(data = . %>% filter(variable == max(variable)), aes(x = variable, y = value, label = team))
 #Shows the average speed in the local area for each year's line. 
 #Seems 2013 start, middled and ended slower
 #2014 started fasted, middled high but faded towards the end
 #2015 started 2nd fasted, maintained and finished strong. 
 #This is all based on average speed across years. Could look at average speed for different countries or per athlete across all years
+#Plot shows mean speed profiles per country with labels- labels overlap but cant get geom_text_repel to work
+ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = team, colour = team, label = team)) +
+        geom_smooth(method = loess, size = 2) +
+        geom_label(data = group_by(melted_mss_speed,team) %>%
+                           do(augment(loess(value~variable, .))) %>%
+                           filter(variable == max(variable)),
+                           aes(variable, .fitted), nudge_x = 100)
+
+#Time to chuck it all into a model
+#Tricky part will be setting variables - speed over the race is an important variable but in the data it is 40 different columns
+#When data is melted we lose the split times, ultimately what we want to predict
+#Want a linear regression style model that takes variables speed, stroke rate, and athlete name and allows us to fit the data to split times - 
+#Then holding all variables constant, look at how one variable affects split times ie increasing stroke rate during the first 500m
+melted_mss_stroke <- data_melt %>%
+        filter(str_detect(variable, 'strokes'))
+
+#Create one data set with both speed and stroke rate 
+melted_mss_stroke$variable <- parse_number(melted_mss_stroke$variable) 
+melted_mss_stroke <- arrange(melted_mss_stroke, row_id, variable)
+row_pred_data <- melted_mss_speed
+colnames(row_pred_data)[22] = 'distance'
+colnames(row_pred_data)[23] = 'speed'
+row_pred_data$stroke <- melted_mss_stroke$value
+
+#Try a different tact - map the values
+melted_mss_splits <- arrange(melted_mss_splits, row_id)
+melted_mss_splits$distance <- rep(c(500,1000,1500,2000), length(unique(melted_mss_splits$row_id)))
+
+test <- data.frame()
+tmp <- data.frame()
+row_id <- row_pred_data$row_id
+for(i in row_id){
+        test <- plyr::mapvalues(row_pred_data$distance, melted_mss_splits$distance, melted_mss_splits$value)
+        tmp <- rbind(test, tmp)
+}
+
+#Just work on one run
+run <- row_pred_data[1:40,]
+splits <- melted_mss_splits[1:4,]
+run$split <- splits$value[match(run$distance, splits$distance)]
+#model
+mod <- lm(split ~ distance + speed + stroke, run)
+#Playing around with predictors
+predict(mod, newdata = transform(run, stroke = 40))
+predict(mod, newdata = transform(run, stroke = 40, speed = 4.9))
+#fill gaps in splits
+new_data <- data.frame(distance = seq(0, 2000, 50), speed = run$speed, stroke = run$stroke)
+pred <- predict(mod, newdata = new_data)
+run$split2 <- pred
+#Plot - very straight line, no surprise, but pretty much what a race looks like. 
+ggplot(run, aes(x = distance, y = split2)) +
+        geom_line()
+#See how speed changes over the course of a race
+ggplot(run, aes(x = distance, y = speed)) +
+        geom_line()
+#See how stroke rate changes
+ggplot(run, aes(x = distance, y = stroke)) +
+        geom_line()
+#Stroke and speed reach lowest level at around 1000m. stroke steadly increases from there, speed does too - 
+#though scale is less senstive. 
+
+#IDEA: set up a shiny app that selects an athlete, builds model based on their races, and then you can manipulate
+#speed or stroke. Can plot more than 1 athlete and see how stroke and speed affect different athlets or all athletes
+
+
+
+
+
+
 
