@@ -6,6 +6,7 @@ library(DataExplorer)
 library(summarytools)
 library(lubridate)
 library(reshape2)
+library(ggrepel)
 
 #Couple of cool ways of seeing the data
 view(dfSummary(rowing_world_championships))     #Quick summary shown in html (webpage)
@@ -108,6 +109,32 @@ table(melted_mss_splits$year)
 ggplot(filter(melted_mss_splits, variable == 'split_4_time'), aes(x = variable, y = value, group = row_id, colour = year)) +
         geom_jitter(width = 0.1, size = 5, alpha = 0.5)
 #This plot gives a good sense of the spread of results, 2015 had very little spread, 2013 looked slower overall, 2015 and 17 had large spread.
-#This is probably all ill do on splits, time to move on to predictions. 
 
+#Lets look at speed through the race
+melted_mss_speed <- data_melt %>%
+        filter(str_detect(variable, 'speed'))
+#Set the variable col to the speed distance only. ie remove 'speed_' from string
+melted_mss_speed$variable <- parse_number(melted_mss_speed$variable) #parse_number is a great function for getting the number out of a string
+#order based on run (row_id) and speed
+melted_mss_speed <- arrange(melted_mss_speed, row_id, variable)
+#Now data is ordered by row_id so one run after another and in smallest to largest speed distance ie start of race to end. 
+#plot all races looking at speed across the race grouped by row_id
+ggplot(melted_mss_speed, aes(x = variable, y = value, group = row_id, colour = year)) +
+        geom_line()
+#319 rows contained missing data - will look at this
+#seems in some runs the speed was very low after 50m, and some runs it stayed very low - possible data collection issue? 
+#speeds are between 3 and 6, with mean sitting at approx 4.25. Could disregard any runs with < 3 speed after 250m
+ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = row_id, colour = year)) +
+        geom_line()
+#Can see where the 'wrong' runs are comming in. Problem with viz is the 2017 values blocking everything else. 
+#fit a basic lm
+ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = year, colour = year)) +
+        geom_jitter(alpha = 0.2) +
+        geom_smooth(method = loess, size = 2) +
+        geom_text_repel(data = . %>% filter(x == max(x)), aes(x = x, y = y, label = group))
+#Shows the average speed in the local area for each year's line. 
+#Seems 2013 start, middled and ended slower
+#2014 started fasted, middled high but faded towards the end
+#2015 started 2nd fasted, maintained and finished strong. 
+#This is all based on average speed across years. Could look at average speed for different countries or per athlete across all years
 
