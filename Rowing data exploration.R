@@ -160,18 +160,19 @@ row_pred_data <- melted_mss_speed
 colnames(row_pred_data)[22] = 'distance'
 colnames(row_pred_data)[23] = 'speed'
 row_pred_data$stroke <- melted_mss_stroke$value
+###Accidently did this twice###
+#To so this i need to model all the data for this race
+mss_model_data <- data.frame(cbind(melted_mss_speed, stroke = melted_mss_stroke$value))
+#Change col names
+mss_model_data <- rename(mss_model_data, distance = 23, speed = 24)
+rm(mss_model_data)
+
 
 #Try a different tact - map the values
 melted_mss_splits <- arrange(melted_mss_splits, row_id)
 melted_mss_splits$distance <- rep(c(500,1000,1500,2000), length(unique(melted_mss_splits$row_id)))
 
-test <- data.frame()
-tmp <- data.frame()
-row_id <- row_pred_data$row_id
-for(i in row_id){
-        test <- plyr::mapvalues(row_pred_data$distance, melted_mss_splits$distance, melted_mss_splits$value)
-        tmp <- rbind(test, tmp)
-}
+
 
 #Just work on one run
 run <- row_pred_data[1:40,]
@@ -185,9 +186,9 @@ predict(mod, newdata = transform(run, stroke = 40, speed = 4.9))
 #fill gaps in splits
 new_data <- data.frame(distance = seq(0, 2000, 50), speed = run$speed, stroke = run$stroke)
 pred <- predict(mod, newdata = new_data)
-run$split2 <- pred
+run$split3 <- pred
 #Plot - very straight line, no surprise, but pretty much what a race looks like. 
-ggplot(run, aes(x = distance, y = split2)) +
+ggplot(run, aes(x = distance, y = split)) +
         geom_line()
 #See how speed changes over the course of a race
 ggplot(run, aes(x = distance, y = speed)) +
@@ -200,10 +201,103 @@ ggplot(run, aes(x = distance, y = stroke)) +
 
 #IDEA: set up a shiny app that selects an athlete, builds model based on their races, and then you can manipulate
 #speed or stroke. Can plot more than 1 athlete and see how stroke and speed affect different athlets or all athletes
+#So for each athlete, when selected (test filter) it builds 1 model on their races - 4 races per year for top athletes. 
+#Should also generate plots that show speed and stroke rate over course of race
+
+#Using the row_pred_data created earlier
+#Want to set up the larger data set like the run set
+
+test <- row_pred_data[,20:25]
+tmp <- data.frame()
+df <- data.frame()
+row_id <- unique(row_pred_data$row_id)
+for(i in row_id){
+        df <- test[ test$row_id==i, ]
+        split <- melted_mss_splits[ melted_mss_splits$row_id == i, ]
+        df$split <- split$value[match(df$distance, split$distance)]
+        tmp <- rbind(df, tmp)
+}
+#Bit slow (a few seconds) using for loop but does the job
+tmp <- arrange(tmp, row_id)
+row_pred_data$split <- tmp$split
 
 
+#basic lm model
+all_data_mod <- lm(split ~ distance + speed, row_pred_data)
+#Obvious that distance is highly predictive of split times - speed also is significant, stroke not sig. try removing distance
+mod2 <- lm(split ~ speed + stroke, row_pred_data)
+#Speed is highly sig, stroke a little sig, but r-squared is 0.02. not a good fit. 
 
+new_data <- data.frame(distance = row_pred_data$distance, speed = row_pred_data$speed, stroke = row_pred_data$stroke)
+new_data$pred_split <- predict(mod, newdata = new_data)
+#Ends up with a very restricted and poor prediction of final split time. 
+#This is because (i think) speed is most important predictor, but its not very precise (only 1 decimal place)
+#So runs end up looking much the same with broad speeds used to predict. Might try adding in place
+melted_mss_place <- data_melt %>%
+        filter(str_detect(variable, 'rank_final'))
+melted_mss_place$value <- as.factor(melted_mss_place$value)
 
+#This hasnt worked well, including all runs just averages everything out leading to bad results.
+#I just want a model for each run - so make a list of data frames, each being a run and fit a model to each item in list
+#but for now, I still need to figure out how to model the race result when you change a variable. may be an optimisation problem?
+#Clearly distance is highly pred, and constrains the model a lot, lets take it out
+#This was a quick fail. It needs distance or it just generates random numbers based on speed, doesnt account for race progression
+mod <- lm(split2 ~ distance + speed + stroke, run)
+predict(mod, newdata = transform(run[1:10,], speed = 4.9))
+new_data <- data.frame(speed = run$speed, stroke = run$stroke)
+new_data$split_pred <- predict(mod, newdata = new_data)
 
+ggplot(run_slow, aes(x = distance, y = split)) +
+        geom_smooth(method = lm)
 
+#try predicting a slow race from fast race data
+#just saw two runs with obviously wrong data so delete
+row_pred_data <- filter(row_pred_data, row_id != "768")
+row_pred_data <- filter(row_pred_data, row_id != "767")
+row_pred_data <- filter(row_pred_data, row_id != "770")
+row_pred_data <- filter(row_pred_data, row_id != "773")
+
+run_fast <- row_pred_data[81:120,]
+run_slow <- row_pred_data[801:840,]
+
+mod_slow <- lm(split ~ distance + speed, run_slow)
+mod_fast <- lm(split ~ distance + speed, run_fast)
+
+new_data <- data.frame(distance = run_fast$distance, speed = run_fast$speed, stroke = run_fast$stroke)
+pred_og <- predict(mod_slow, newdata = run_slow)
+slow_pred_by_fast$split_og <- pred_og
+slow_pred_by_fast <- cbind(run_slow, pred)
+fast_pred_by_slow$split2 <- pred
+fast_pred_by_slow <- cbind(run_slow, pred)
+
+ggplot(fast_pred_by_slow) +
+        geom_line(aes(x = distance, y = split)) +
+        geom_line(aes(x = distance, y = pred))+
+        geom_line(aes(x = distance, y = split2))
+
+#What did i learn? using just speed is better, not always as accurate but less variation. smaller misses. 
+#predicting the result of a slow race using a model trained on fast data shows a pretty good approx when only using speed
+#fast race predicted from slow model def changes the end result to a much faster time than what the model was trained on - showing speed is 
+#doing its job in the model, but misses the actual result by about 13 seconds, as opposed to 6 seconds in the first case. 
+#Maybe rerun this stuff and make it more clear the effect of each added variable on predicted outcomes. 
+#also play with made up data - did this, works pretty well. guess the main thing is, to make a new model for each run, or for each athlete at least. 
+
+#Retry modeling all data
+all_data_mod <- lm(split ~ distance + speed, row_pred_data)
+#Fast run
+new_data <- data.frame(distance = run_fast$distance, speed = run_fast$speed, stroke = run_fast$stroke)
+pred_all_fast <- predict(all_data_mod, newdata = new_data)
+#Slow run
+new_data_slow <- data.frame(distance = run_slow$distance, speed = run_slow$speed)
+pred_all_slow <- predict(all_data_mod, newdata = new_data_slow)
+#normal run
+new_data_norm <- data.frame(distance = run$distance, speed = run$speed)
+pred_all_norm <- predict(mod_fast, newdata = new_data_norm)
+#Does an ok job of predicting the 3 runs. but not that accurate. May be a good general model by modeling each race is still a good idea
+#make some fake data
+data <- data.frame(speed = c(4.9,4.7,4.8,5), distance = c(500,1000,1500,2000))
+data$pred <- predict(mod_fast, newdata = data)
+#This gets the same result. each point on the distance scale is taken along with the speed to determine time at that point
+#This is independent of all other time points or distance. There is no effect of the last check point on the time at the end. 
+#How can this be improved? 
 
