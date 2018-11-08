@@ -7,6 +7,7 @@ library(summarytools)
 library(lubridate)
 library(reshape2)
 library(ggrepel)
+library(magrittr)
 
 #Couple of cool ways of seeing the data
 view(dfSummary(rowing_world_championships))     #Quick summary shown in html (webpage)
@@ -91,12 +92,12 @@ ggplot(filter(synek, variable == 'split_4_time'), aes(x = variable, y = value, g
 #Start again by looking at the one race type
 rowing_world_championships$row_id <- c(1:nrow(rowing_world_championships))
 rowing_world_championships$row_id <- as.factor(rowing_world_championships$row_id)
-mss <- filter(rowing_world_championships, event_category == "Men's Single Sculls")
-mss$race_date <- dmy(mss$race_date)
+mss <- filter(rowing_world_championships, event_cateogry_abbreviation == "M1x")
+mss$race_date <- ymd(mss$race_date)
 mss <- arrange(mss, race_date) #Found data is pretty inconsequential outside of year so will only consider year
 mss$year <- year(mss$race_date)
 mss$year <- as.factor(mss$year)
-mss <- select(mss, -c(Year, lane_sl, event_cateogry_abbreviation, event_num, race_number, coxswain_birthday:third_name))
+mss <- select(mss, -c(Year, lane_sl, event_category, event_num, race_number, coxswain_birthday:third_name))
 data_melt <- melt(mss)
 melted_mss_splits <- filter(data_melt,variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
 #plot
@@ -301,3 +302,175 @@ data$pred <- predict(mod_fast, newdata = data)
 #This is independent of all other time points or distance. There is no effect of the last check point on the time at the end. 
 #How can this be improved? 
 
+#Maybe time-series analysis? But i dont want to get too far into that.
+#Use this lm to show how speed can impact the outcome.
+#Maybe look at adding rank into a random forest just to do it. 
+#Then look at using maybe random forest to set up funnels. This would work by classifying the finals 
+#Winning times as the outcome of interest.
+
+#From mitch's idea - use split time 1 to predict split 2; split 2 for split 3 and so on.
+#Overall viz of this idea
+ggplot(mss, aes(x = split_3_time, y = split_4_time, group = championship_name_description, colour = championship_name_description)) +
+        geom_point() +
+        geom_smooth(method = lm)
+#Clearly some outliers to remove
+rowing_world_championships <- filter(rowing_world_championships, split_1_time < 250)
+rowing_world_championships <- filter(rowing_world_championships, split_2_time < 550)
+
+#Prediction: Final rank predicted from heat, semi, prelim rank (or time)
+#seems to be more finals than any other type of race
+unique(mss$round_type)
+#plot
+ggplot(mss, aes(x = round_type)) +
+        geom_bar()
+#Group by competition
+ggplot(mss, aes(x = round_type, fill = championship_name_description)) +
+        geom_bar(position = 'dodge')
+#seems like there were more races in general in 2015 and less in 2014. 
+#Plot finishing time by round type
+ggplot(mss, aes(x = round_type, y = split_4_time)) + 
+        geom_boxplot()
+#Overall semi is the fastest race followed by quater, final is no faster than heats and repecharge much slower than all others
+#Means finals are not faster races generally. Maybe conditions play a bigger part than expected
+ggplot(mss, aes(x = round_type, y = split_4_time, colour = championship_name_description)) + 
+        geom_boxplot()
+#Viz is off, try something else
+ggplot(mss, aes(x = year, y = split_4_time, colour = round_type)) + 
+        geom_boxplot()
+#Better - no clear pattern but something to the idea semi is fastest. 
+#Came across a problem with the years. There is no data from 2010, 2012, 2016 - using event category was a bad choice
+mss <- filter(rowing_world_championships, event_cateogry_abbreviation == "M1x")
+#final times have by far the widest spread. people giving up at the end? 
+#Remove runs that took longer than 500 seconds? 
+mss <- filter(mss, split_4_time < 500)
+#No clear pattern, semis are faster in later years but not so in first couple of years. TIME NOT A GOOD VARIABLE
+xyplot(split_4_time ~ rank_final | round_type, data = mss, layout = c(5,1))
+#interesting plot showing spread of times for each placing for each round_type. Big spread in finals, very tight in quarters. 
+#Change order of plots in lattice
+xyplot(split_4_time ~ rank_final | round_type, group = as.factor(year), data = mss, layout = c(5,1), 
+       auto.key=list(space="right", points=T), index.cond = list(c(2,4,3,5,1)))
+#Cool plot. shows how useless time is. Also shows there are multiple 'final' races in each year- whats this about? 
+#Tells me rank may be the best predictor for future result. does heat rank predict quater rank? 
+mss <- filter(mss, dnf == 'FALSE')
+mss_rank <- select(mss, .data$team, .data$rank_final, .data$progression, .data$round, .data$round_type, .data$year, .data$row_id)
+melted_mss_rank <- melt(mss_rank)
+#Trying to understand this data: Round and round type
+#Finals: FA, FB, FC, FD, FE, FF
+#FA is the medal final, the others contain losers from semis, quarters, rep etc
+#So want to predict place in FA from other variables
+#First fix some of the data
+
+melted_mss_rank$round <- str_replace(melted_mss_rank$round, "QAD ", "Q")
+melted_mss_rank$round <- str_replace(melted_mss_rank$round, "QEH ", "Q")
+#For some reason the round_type is all out, not needed
+melted_mss_rank <- select(melted_mss_rank, -starts_with('round_type'))
+melted_mss_rank <- select(melted_mss_rank, -starts_with('progression'))
+
+#Trying to get data to a point where i can use rank in prior races to predict final rank. Not working
+test <- spread(mss_rank, key = 'year', value = 'rank_final')
+mx1_2017 <- test[,c(1,2,3,9)]
+#Whats the point of predicting who makes the final based on rank? obviously if you finish higher you have more chance to make finals
+#What about a plot that shows a rowers progression through the competition
+names(mx1_2017)[4] <- 'rank'
+mx1_2017$rank <- as.numeric(mx1_2017$rank)
+mx1_2017 <- filter(mx1_2017, complete.cases(mx1_2017))
+
+ggplot(mx1_2017, aes(x = round, y = rank, group = team, colour = team)) +
+        geom_line()
+#Good start - now make all heats and repecharges the same (ie H instead of H1, H2 etc) then order the rounds
+#Something with a 'starts with 'H'' type argument would be better but couldnt find. Dont like grep functions - too hard to read. 
+mx1_2017$round <- mx1_2017$round %<>%
+        str_replace("H1", "H") %>%
+        str_replace("H2", "H") %>%
+        str_replace("H3", "H") %>%
+        str_replace("H4", "H") %>%
+        str_replace("H5", "H") %>%
+        str_replace("H6", "H") %>%
+        str_replace("H7", "H") %>%
+        str_replace("H8", "H") %>%
+        str_replace("R1", "R") %>%
+        str_replace("R2", "R") %>%
+        str_replace("R3", "R") %>%
+        str_replace("R4", "R") %>%
+        str_replace("R5", "R") %>%
+        str_replace("R6", "R") %>%
+        str_replace("R7", "R") %>%
+        str_replace("R8", "R")
+#Order the rounds from earliest to latest
+mx1_2017$round2 <- ordered(mx1_2017$round2, levels = c('H', 'R', 'Q4', 'Q3', 'Q2', 'Q1', 'SE/F/G 3', 'SE/F/G 2', 
+                                                       'SE/F/G 1', 'SC/D 2', 'SC/D 1', 'SA/B 2', 'SA/B 1', 'FG', 
+                                                       'FF', 'FE', 'FD', 'FC', 'FB', 'FA'))
+#Select teams that made it to Finals A (medal finals)
+teams <- mx1_2017[mx1_2017$round == "FA",1]
+#Plot each Finals A team through each round
+ggplot(filter(mx1_2017, team %in% teams), aes(x = round2, y = rank, group = team, colour = team)) +
+        geom_line(size = 1.5, alpha = 0.6) +
+        geom_point()
+#Now that i have a plan and code lets try this for the whole data set
+
+spread_mss_rank <- spread(mss_rank, key = 'year', value = 'rank_final')
+names(spread_mss_rank) <- c('team', 'round', 'rank', 'rank', 'rank', 'rank','rank', 'rank', 'rank')
+r1 <- spread_mss_rank[,c(1,2,4)]
+r1 <- filter(r1, complete.cases(r1))
+r1$year <- 2010
+r2 <- spread_mss_rank[,c(1,2,5)]
+r2 <- filter(r2, complete.cases(r2))
+r2$year <- 2011
+r3 <- spread_mss_rank[,c(1,2,6)]
+r3 <- filter(r3, complete.cases(r3))
+r3$year <- 2013
+r4 <- spread_mss_rank[,c(1,2,7)]
+r4 <- filter(r4, complete.cases(r4))
+r4$year <- 2014
+r5 <- spread_mss_rank[,c(1,2,8)]
+r5 <- filter(r5, complete.cases(r5))
+r5$year <- 2015
+r6 <- spread_mss_rank[,c(1,2,9)]
+r6 <- filter(r6, complete.cases(r6))
+r6$year <- 2017
+mx1_prog <- rbind(r1,r2,r3,r4,r5,r6)
+
+#Whats the point of predicting who makes the final based on rank? obviously if you finish higher you have more chance to make finals
+#Good start - now make all heats and repecharges the same (ie H instead of H1, H2 etc) then order the rounds
+#Something with a 'starts with 'H'' type argument would be better but couldnt find. Dont like grep functions - too hard to read. 
+mx1_prog$round <- mx1_prog$round %<>%
+        str_replace("H1", "H") %>%
+        str_replace("H2", "H") %>%
+        str_replace("H3", "H") %>%
+        str_replace("H4", "H") %>%
+        str_replace("H5", "H") %>%
+        str_replace("H6", "H") %>%
+        str_replace("H7", "H") %>%
+        str_replace("H8", "H") %>%
+        str_replace("R1", "R") %>%
+        str_replace("R2", "R") %>%
+        str_replace("R3", "R") %>%
+        str_replace("R4", "R") %>%
+        str_replace("R5", "R") %>%
+        str_replace("R6", "R") %>%
+        str_replace("R7", "R") %>%
+        str_replace("R8", "R")
+#Order the rounds from earliest to latest
+mx1_prog$round <- ordered(mx1_prog$round, levels = c('H', 'R', 'Q4', 'Q3', 'Q2', 'Q1', 'SE/F/G 3', 'SE/F/G 2', 
+                                                       'SE/F/G 1','SE/F 1','SE/F 2', 'SC/D 2', 'SC/D 1', 'SA/B 2', 'SA/B 1', 'FG', 
+                                                       'FF', 'FE', 'FD', 'FC', 'FB', 'FA'))
+
+teams2010 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2010',1]
+teams2011 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2011',1]
+teams2013 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2013',1]
+teams2014 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2014',1]
+teams2015 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2015',1]
+teams2017 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2017',1]
+
+
+#What about a plot that shows a rowers progression through the competition
+ggplot(filter(mx1_prog, team %in% teams2017 & year == '2017'), aes(x = round, y = rank, group = team, colour = team)) +
+        geom_line(size = 1.5, alpha = 0.6) +
+        geom_point()
+
+ggplot(mx1_prog, aes(x = round, y = rank, group = team, colour = team)) +
+        geom_line(size = 1.5, alpha = 0.6) +
+        geom_point()
+
+#maybe this could be a table on the shiny app.
+rank1 <- mx1_prog[mx1_prog$round == 'FA' & mx1_prog$rank == 1,]
