@@ -8,6 +8,12 @@ library(lubridate)
 library(reshape2)
 library(ggrepel)
 library(magrittr)
+library(broom)
+library(RColorBrewer)
+#devtools::install_github('thomasp85/gganimate')
+#devtools::install_github("thomasp85/transformr")
+library(transformr)
+library(gganimate)
 
 #Couple of cool ways of seeing the data
 view(dfSummary(rowing_world_championships))     #Quick summary shown in html (webpage)
@@ -32,16 +38,21 @@ data_melt <- melt(mss)
 race_1 <- filter(data_melt, race_id == 'ROM012901' & championship_name_description == 'Slovenia 28 Aug - 4 Sept 2011""')
 #Isolate the race splits
 race_1_splits <- filter(race_1, variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+race_2 <- data_melt %>% filter(race_id == 'ROM012901' & 
+                        championship_name_description == 'Slovenia 28 Aug - 4 Sept 2011""') %>%
+                                filter(variable == 'split_1_time' | variable == 'split_2_time' | 
+                                           variable == 'split_3_time' | variable == 'split_4_time')
 #Plot Race 1 progression. Bit boring
 ggplot(race_1_splits, aes(x = variable, y = value, group = bow_name, colour = bow_name)) +
     geom_line() #+ 
     #theme(legend.position="none")
 #Look at one athlete over time
-synek <- filter(data_melt, bow_name == 'SYNEK Ondrej')
-synek <- filter(synek,variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+synek <- data_melt %>% filter(bow_name == 'SYNEK Ondrej') %>%
+        filter(synek,variable == 'split_1_time' | variable == 'split_2_time' | 
+                       variable == 'split_3_time' | variable == 'split_4_time')
 
 #Plot 1 athlete's progress over time - ie overlay all split progressions through all races in set
-ggplot(synek, aes(x = variable, y = value, group = row_id, colour = row_id)) +
+ggplot(synek, aes(x = variable, y = value, group = row_id, colour = year)) +
         geom_line()
 #Cool plot to show grouping of times based on round type (heat, quarter, semi or final)
 ggplot(synek, aes(x = variable, y = value, group = row_id, colour = round_type)) +
@@ -126,25 +137,29 @@ ggplot(melted_mss_speed, aes(x = variable, y = value, group = row_id, colour = y
 #seems in some runs the speed was very low after 50m, and some runs it stayed very low - possible data collection issue? 
 #speeds are between 3 and 6, with mean sitting at approx 4.25. Could disregard any runs with < 3 speed after 250m
 ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = row_id, colour = year)) +
-        geom_line()
+        geom_line() 
+
 #Can see where the 'wrong' runs are comming in. Problem with viz is the 2017 values blocking everything else. 
 #fit a basic lm
 ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = team, colour = team)) +
         geom_jitter(alpha = 0.2) +
-        geom_smooth(method = loess, size = 2) +
-        geom_text_repel(data = . %>% filter(variable == max(variable)), aes(x = variable, y = value, label = team))
+        geom_smooth(method = loess, size = 2, se = FALSE) 
+        #geom_text_repel(data = . %>% filter(variable == max(variable)), aes(x = variable, y = value, label = team))
 #Shows the average speed in the local area for each year's line. 
 #Seems 2013 start, middled and ended slower
 #2014 started fasted, middled high but faded towards the end
 #2015 started 2nd fasted, maintained and finished strong. 
 #This is all based on average speed across years. Could look at average speed for different countries or per athlete across all years
 #Plot shows mean speed profiles per country with labels- labels overlap but cant get geom_text_repel to work
-ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = team, colour = team, label = team)) +
-        geom_smooth(method = loess, size = 2) +
-        geom_label(data = group_by(melted_mss_speed,team) %>%
+ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), 
+       aes(x = variable, y = value, group = team, colour = team, label = team)) +
+                geom_smooth(method = loess, size = 2, se = FALSE) +
+                geom_label(data = group_by(melted_mss_speed, team) %>%
                            do(augment(loess(value~variable, .))) %>%
-                           filter(variable == max(variable)),
-                           aes(variable, .fitted), nudge_x = 100)
+                           filter(variable == max(variable)) %>%
+                           filter(top_n(team, 10)),
+                           aes(variable, .fitted), nudge_x = 100, inherit.aes = T) +
+                theme(legend.position="none")
 
 #Time to chuck it all into a model
 #Tricky part will be setting variables - speed over the race is an important variable but in the data it is 40 different columns
@@ -158,8 +173,9 @@ melted_mss_stroke <- data_melt %>%
 melted_mss_stroke$variable <- parse_number(melted_mss_stroke$variable) 
 melted_mss_stroke <- arrange(melted_mss_stroke, row_id, variable)
 row_pred_data <- melted_mss_speed
-colnames(row_pred_data)[22] = 'distance'
-colnames(row_pred_data)[23] = 'speed'
+colnames(row_pred_data)[22] = 'year'
+colnames(row_pred_data)[23] = 'distance'
+colnames(row_pred_data)[24] = 'speed'
 row_pred_data$stroke <- melted_mss_stroke$value
 ###Accidently did this twice###
 #To so this i need to model all the data for this race
@@ -167,12 +183,6 @@ mss_model_data <- data.frame(cbind(melted_mss_speed, stroke = melted_mss_stroke$
 #Change col names
 mss_model_data <- rename(mss_model_data, distance = 23, speed = 24)
 rm(mss_model_data)
-
-
-#Try a different tact - map the values
-melted_mss_splits <- arrange(melted_mss_splits, row_id)
-melted_mss_splits$distance <- rep(c(500,1000,1500,2000), length(unique(melted_mss_splits$row_id)))
-
 
 
 #Just work on one run
@@ -192,11 +202,11 @@ run$split3 <- pred
 ggplot(run, aes(x = distance, y = split)) +
         geom_line()
 #See how speed changes over the course of a race
-ggplot(run, aes(x = distance, y = speed)) +
+speed_dis <- ggplot(run, aes(x = distance, y = speed)) +
         geom_line()
 #See how stroke rate changes
-ggplot(run, aes(x = distance, y = stroke)) +
-        geom_line()
+stroke_dis <- ggplot(data = run) +
+        geom_line(aes(x = distance, y = stroke))
 #Stroke and speed reach lowest level at around 1000m. stroke steadly increases from there, speed does too - 
 #though scale is less senstive. 
 
@@ -207,13 +217,16 @@ ggplot(run, aes(x = distance, y = stroke)) +
 
 #Using the row_pred_data created earlier
 #Want to set up the larger data set like the run set
+#Try a different tact - map the values
+melted_mss_splits <- arrange(melted_mss_splits, row_id)
+melted_mss_splits$distance <- rep(c(500,1000,1500,2000), length(unique(melted_mss_splits$row_id)))
 
-test <- row_pred_data[,20:25]
+data <- row_pred_data[,20:25]
 tmp <- data.frame()
 df <- data.frame()
 row_id <- unique(row_pred_data$row_id)
 for(i in row_id){
-        df <- test[ test$row_id==i, ]
+        df <- data[ data$row_id==i, ]
         split <- melted_mss_splits[ melted_mss_splits$row_id == i, ]
         df$split <- split$value[match(df$distance, split$distance)]
         tmp <- rbind(df, tmp)
@@ -224,7 +237,7 @@ row_pred_data$split <- tmp$split
 
 
 #basic lm model
-all_data_mod <- lm(split ~ distance + speed, row_pred_data)
+all_data_mod <- lm(split ~ distance + speed + stroke, row_pred_data)
 #Obvious that distance is highly predictive of split times - speed also is significant, stroke not sig. try removing distance
 mod2 <- lm(split ~ speed + stroke, row_pred_data)
 #Speed is highly sig, stroke a little sig, but r-squared is 0.02. not a good fit. 
@@ -276,6 +289,19 @@ ggplot(fast_pred_by_slow) +
         geom_line(aes(x = distance, y = pred))+
         geom_line(aes(x = distance, y = split2))
 
+new_data <- run[,22:24]
+new_data_mod <- new_data[1:10,2]+0.2
+new_data_mod2 <- new_data
+new_data_mod2[1:10,2] <- new_data_mod
+
+pred1 <- predict(mod, new_data)
+pred2 <- predict(mod, new_data_mod2)
+pred_test <- cbind(new_data, pred1, pred2)
+
+ggplot(pred_test) +
+        geom_line(aes(x = distance, y = pred1)) +
+        geom_line(aes(x = distance, y = pred2))
+
 #What did i learn? using just speed is better, not always as accurate but less variation. smaller misses. 
 #predicting the result of a slow race using a model trained on fast data shows a pretty good approx when only using speed
 #fast race predicted from slow model def changes the end result to a much faster time than what the model was trained on - showing speed is 
@@ -310,16 +336,29 @@ data$pred <- predict(mod_fast, newdata = data)
 
 #From mitch's idea - use split time 1 to predict split 2; split 2 for split 3 and so on.
 #Overall viz of this idea
-ggplot(mss, aes(x = split_3_time, y = split_4_time, group = championship_name_description, colour = championship_name_description)) +
-        geom_point() +
-        geom_smooth(method = lm)
+split1_2 <- ggplot(mss, aes(x = split_1_time, y = split_2_time, group = championship_name_description, colour = championship_name_description)) +
+        geom_point(alpha = 0.3) +
+        geom_smooth(method = lm) +
+        theme(legend.position="none")
+split2_3 <- ggplot(mss, aes(x = split_2_time, y = split_3_time, group = championship_name_description, colour = championship_name_description)) +
+        geom_point(alpha = 0.3) +
+        geom_smooth(method = lm) +
+        theme(legend.position="none")
+split3_4 <- ggplot(mss, aes(x = split_3_time, y = split_4_time, group = championship_name_description, colour = championship_name_description)) +
+        geom_point(alpha = 0.3) +
+        geom_smooth(method = lm)+
+        theme(legend.position="none")
+grid.arrange(split1_2, split2_3, split3_4, ncol = 1)
 #Clearly some outliers to remove
 rowing_world_championships <- filter(rowing_world_championships, split_1_time < 250)
 rowing_world_championships <- filter(rowing_world_championships, split_2_time < 550)
 
 #Prediction: Final rank predicted from heat, semi, prelim rank (or time)
 #seems to be more finals than any other type of race
-unique(mss$round_type)
+table(mss$round_type)
+#Change to factor and order so they appear in order. 
+mss$round_type <- as.factor(mss$round_type)
+mss$round_type <- ordered(mss$round_type, levels = c('heat', 'repecharge', 'quarterfinal', 'semifinal', 'final'))
 #plot
 ggplot(mss, aes(x = round_type)) +
         geom_bar()
@@ -336,7 +375,8 @@ ggplot(mss, aes(x = round_type, y = split_4_time, colour = championship_name_des
         geom_boxplot()
 #Viz is off, try something else
 ggplot(mss, aes(x = year, y = split_4_time, colour = round_type)) + 
-        geom_boxplot()
+        geom_boxplot() + scale_color_brewer(palette ="Paired")
+
 #Better - no clear pattern but something to the idea semi is fastest. 
 #Came across a problem with the years. There is no data from 2010, 2012, 2016 - using event category was a bad choice
 mss <- filter(rowing_world_championships, event_cateogry_abbreviation == "M1x")
@@ -344,6 +384,7 @@ mss <- filter(rowing_world_championships, event_cateogry_abbreviation == "M1x")
 #Remove runs that took longer than 500 seconds? 
 mss <- filter(mss, split_4_time < 500)
 #No clear pattern, semis are faster in later years but not so in first couple of years. TIME NOT A GOOD VARIABLE
+library(lattice)
 xyplot(split_4_time ~ rank_final | round_type, data = mss, layout = c(5,1))
 #interesting plot showing spread of times for each placing for each round_type. Big spread in finals, very tight in quarters. 
 #Change order of plots in lattice
@@ -403,7 +444,7 @@ mx1_2017$round2 <- ordered(mx1_2017$round2, levels = c('H', 'R', 'Q4', 'Q3', 'Q2
 #Select teams that made it to Finals A (medal finals)
 teams <- mx1_2017[mx1_2017$round == "FA",1]
 #Plot each Finals A team through each round
-ggplot(filter(mx1_2017, team %in% teams), aes(x = round2, y = rank, group = team, colour = team)) +
+ggplot(filter(mx1_2017, team %in% teams), aes(x = round, y = rank, group = team, colour = team)) +
         geom_line(size = 1.5, alpha = 0.6) +
         geom_point()
 #Now that i have a plan and code lets try this for the whole data set
@@ -464,7 +505,8 @@ teams2017 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2017',1]
 
 
 #What about a plot that shows a rowers progression through the competition
-ggplot(filter(mx1_prog, team %in% teams2017 & year == '2017'), aes(x = round, y = rank, group = team, colour = team)) +
+test_plot <- ggplot(filter(mx1_prog, team %in% teams2017 & year == '2017'), 
+       aes(x = round, y = rank, group = team, colour = team)) +
         geom_line(size = 1.5, alpha = 0.6) +
         geom_point()
 
@@ -474,3 +516,35 @@ ggplot(mx1_prog, aes(x = round, y = rank, group = team, colour = team)) +
 
 #maybe this could be a table on the shiny app.
 rank1 <- mx1_prog[mx1_prog$round == 'FA' & mx1_prog$rank == 1,]
+
+#gganimate plot - had to make the rounds numeric so lose information there. 
+#Shows how a rower progresses through a competition in terms of finishing position in each round
+mx1_prog$progression <- unclass(mx1_prog$round)
+ggplot(filter(mx1_prog, team %in% teams2017 & year == '2017'), 
+       aes(x = progression, y = rank, group = team, colour = team)) +
+        geom_line(size = 1.5, alpha = 0.6) +
+        transition_reveal(team, progression)
+
+#I think this is good. if i can get it to work with all gold medalists for example that would be cool. 
+#And a better way to represent round. 
+
+
+#Trying bens idea of animating a race
+fa_2010 <- row_pred_data[1:240, ]
+fa_2010[fa_2010$distance == '50',26] <- 0
+fa_2010 <- select(fa_2010, c(bow_name, distance, split)) %>%
+        na.omit()
+#WORKS!
+race_sim <- ggplot(fa_2010, aes(x = distance, y = bow_name, group = bow_name, colour = rank)) +
+        geom_point() +
+        geom_line() +
+        theme(legend.position="none") +
+        scale_color_brewer(palette ="Spectral") +
+        transition_reveal(bow_name, split)
+animate(race_sim, width = 1000, height = 500, duration = 15)
+#diff animation thats a bit smoother
+animate(race_sim, width = 1000, height = 500, duration = 3, fps = 60)
+#Saves the last created animation 
+anim_save('race_sim_2010_60fps')
+
+
