@@ -87,11 +87,16 @@ mss$year <- as.factor(mss$year)
 data_melt <- melt(mss)
 synek <- filter(data_melt, bow_name == 'SYNEK Ondrej')
 synek <- filter(synek,variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
-ggplot(synek, aes(x = variable, y = value, group = row_id, colour = year)) +
+synek_year <- ggplot(synek, aes(x = variable, y = value, group = row_id, colour = year)) +
+        geom_line()
+synek_round <- ggplot(synek, aes(x = variable, y = value, group = row_id, colour = round_type)) +
         geom_line()
 #This makes for a more interesting date based analysis - how times change over the years. Also just focus in on the final time to see changes clearer
-ggplot(filter(synek, variable == 'split_4_time'), aes(x = variable, y = value, group = row_id, colour = year, shape = round_type)) +
+synek_times <- ggplot(filter(synek, variable == 'split_4_time'), aes(x = variable, y = value, group = row_id, colour = year, shape = round_type)) +
         geom_jitter(width = 0.02, size = 5)
+
+library(gridExtra)
+grid.arrange(synek_year, synek_round)
 #Not quite as clear as id hope but shows finals are quicker - maybe too many splits (year and round type)
 #From year - 2014 had the slowest and fastest times, slowest was quarter, fastest was final. Semi was also very quick that year 
 #Overall this is a good approach to zoom in on a single athlete in a single race but the dataset is much richer than this. 
@@ -448,53 +453,43 @@ ggplot(filter(mx1_2017, team %in% teams), aes(x = round, y = rank, group = team,
         geom_line(size = 1.5, alpha = 0.6) +
         geom_point()
 #Now that i have a plan and code lets try this for the whole data set
+#THis code is bad and redundant 
+# spread_mss_rank <- spread(mss_rank, key = 'year', value = 'rank_final')
+# names(spread_mss_rank) <- c('team', 'round', 'rank', 'rank', 'rank', 'rank','rank', 'rank', 'rank')
+# r1 <- spread_mss_rank[,c(1,2,4)]
+# r1 <- filter(r1, complete.cases(r1))
+# r1$year <- 2010
+# r2 <- spread_mss_rank[,c(1,2,5)]
+# r2 <- filter(r2, complete.cases(r2))
+# r2$year <- 2011
+# r3 <- spread_mss_rank[,c(1,2,6)]
+# r3 <- filter(r3, complete.cases(r3))
+# r3$year <- 2013
+# r4 <- spread_mss_rank[,c(1,2,7)]
+# r4 <- filter(r4, complete.cases(r4))
+# r4$year <- 2014
+# r5 <- spread_mss_rank[,c(1,2,8)]
+# r5 <- filter(r5, complete.cases(r5))
+# r5$year <- 2015
+# r6 <- spread_mss_rank[,c(1,2,9)]
+# r6 <- filter(r6, complete.cases(r6))
+# r6$year <- 2017
+# mx1_prog <- rbind(r1,r2,r3,r4,r5,r6)
 
-spread_mss_rank <- spread(mss_rank, key = 'year', value = 'rank_final')
-names(spread_mss_rank) <- c('team', 'round', 'rank', 'rank', 'rank', 'rank','rank', 'rank', 'rank')
-r1 <- spread_mss_rank[,c(1,2,4)]
-r1 <- filter(r1, complete.cases(r1))
-r1$year <- 2010
-r2 <- spread_mss_rank[,c(1,2,5)]
-r2 <- filter(r2, complete.cases(r2))
-r2$year <- 2011
-r3 <- spread_mss_rank[,c(1,2,6)]
-r3 <- filter(r3, complete.cases(r3))
-r3$year <- 2013
-r4 <- spread_mss_rank[,c(1,2,7)]
-r4 <- filter(r4, complete.cases(r4))
-r4$year <- 2014
-r5 <- spread_mss_rank[,c(1,2,8)]
-r5 <- filter(r5, complete.cases(r5))
-r5$year <- 2015
-r6 <- spread_mss_rank[,c(1,2,9)]
-r6 <- filter(r6, complete.cases(r6))
-r6$year <- 2017
-mx1_prog <- rbind(r1,r2,r3,r4,r5,r6)
-
+mx1_prog <- mss_rank %>%
+        select(team, round, rank_final, year) %>%
+        arrange(year, team)
+mx1_prog$team <- as.factor(mx1_prog$team)
 #Whats the point of predicting who makes the final based on rank? obviously if you finish higher you have more chance to make finals
 #Good start - now make all heats and repecharges the same (ie H instead of H1, H2 etc) then order the rounds
 #Something with a 'starts with 'H'' type argument would be better but couldnt find. Dont like grep functions - too hard to read. 
-mx1_prog$round <- mx1_prog$round %<>%
-        str_replace("H1", "H") %>%
-        str_replace("H2", "H") %>%
-        str_replace("H3", "H") %>%
-        str_replace("H4", "H") %>%
-        str_replace("H5", "H") %>%
-        str_replace("H6", "H") %>%
-        str_replace("H7", "H") %>%
-        str_replace("H8", "H") %>%
-        str_replace("R1", "R") %>%
-        str_replace("R2", "R") %>%
-        str_replace("R3", "R") %>%
-        str_replace("R4", "R") %>%
-        str_replace("R5", "R") %>%
-        str_replace("R6", "R") %>%
-        str_replace("R7", "R") %>%
-        str_replace("R8", "R")
+mx1_prog[grep('H', mx1_prog$round), 4] <- 'H'
+mx1_prog[grep('R', mx1_prog$round), 4] <- 'R'
 #Order the rounds from earliest to latest
 mx1_prog$round <- ordered(mx1_prog$round, levels = c('H', 'R', 'Q4', 'Q3', 'Q2', 'Q1', 'SE/F/G 3', 'SE/F/G 2', 
                                                        'SE/F/G 1','SE/F 1','SE/F 2', 'SC/D 2', 'SC/D 1', 'SA/B 2', 'SA/B 1', 'FG', 
                                                        'FF', 'FE', 'FD', 'FC', 'FB', 'FA'))
+
 
 teams2010 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2010',1]
 teams2011 <- mx1_prog[mx1_prog$round == "FA" & mx1_prog$year == '2011',1]
@@ -530,21 +525,29 @@ ggplot(filter(mx1_prog, team %in% teams2017 & year == '2017'),
 
 
 #Trying bens idea of animating a race
-fa_2010 <- row_pred_data[1:240, ]
-fa_2010[fa_2010$distance == '50',26] <- 0
-fa_2010 <- select(fa_2010, c(bow_name, distance, split)) %>%
+fa_2017 <- filter(row_pred_data, year == '2017' & round == 'FA')
+fa_2017[fa_2017$distance == '50',26] <- 0
+fa_2017 <- select(fa_2017, c(bow_name, distance, split)) %>%
         na.omit()
-#WORKS!
-race_sim <- ggplot(fa_2010, aes(x = distance, y = bow_name, group = bow_name, colour = rank)) +
-        geom_point() +
-        geom_line() +
+fa_2017$rank <- as.factor(c(6,6,6,6,6,4,4,4,4,4,1,1,1,1,1,3,3,3,3,3,2,2,2,2,2,5,5,5,5,5))
+
+race_sim_2017 <- ggplot(fa_2017, aes(x = distance, y = bow_name, group = bow_name, colour = rank)) +
+        geom_point(size = 4) +
+        geom_line(size = 4) +
         theme(legend.position="none") +
-        scale_color_brewer(palette ="Spectral") +
+        scale_color_brewer(palette ="Greens", direction = -1) +
+        labs(x = 'Distance' , y = '') +
+        geom_vline(xintercept = 2000, linetype="dotted", size = 1) +
         transition_reveal(bow_name, split)
-animate(race_sim, width = 1000, height = 500, duration = 15)
+animate(race_sim_2017, width = 1000, height = 500, duration = 15)
 #diff animation thats a bit smoother
-animate(race_sim, width = 1000, height = 500, duration = 3, fps = 60)
+animate(race_sim_2017, width = 1000, height = 500, duration = 3, fps = 60)
 #Saves the last created animation 
-anim_save('race_sim_2010_60fps')
+anim_save('race_sim_2017_60fps.gif')
 
 
+
+r_2010 <- mss_rank %>%
+        filter(year %in% '2010') %>%
+        select(team, round, rank_final, year) %>%
+        arrange(team)
