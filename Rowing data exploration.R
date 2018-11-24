@@ -137,12 +137,12 @@ melted_mss_speed <- arrange(melted_mss_speed, row_id, variable)
 #Now data is ordered by row_id so one run after another and in smallest to largest speed distance ie start of race to end. 
 #plot all races looking at speed across the race grouped by row_id
 ggplot(melted_mss_speed, aes(x = variable, y = value, group = row_id, colour = year)) +
-        geom_line()
+        geom_line(alpha = 0.3)
 #319 rows contained missing data - will look at this
 #seems in some runs the speed was very low after 50m, and some runs it stayed very low - possible data collection issue? 
 #speeds are between 3 and 6, with mean sitting at approx 4.25. Could disregard any runs with < 3 speed after 250m
 ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, y = value, group = row_id, colour = year)) +
-        geom_line() 
+        geom_line(alpha = 0.3) 
 
 #Can see where the 'wrong' runs are comming in. Problem with viz is the 2017 values blocking everything else. 
 #fit a basic lm
@@ -158,11 +158,11 @@ ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), aes(x = variable, 
 #Plot shows mean speed profiles per country with labels- labels overlap but cant get geom_text_repel to work
 ggplot(filter(melted_mss_speed, variable >= 250 & value > 3), 
        aes(x = variable, y = value, group = team, colour = team, label = team)) +
-                geom_smooth(method = loess, size = 2, se = FALSE) +
+                geom_smooth(method = loess, size = 2, se = FALSE, alpha = 0.3) +
                 geom_label(data = group_by(melted_mss_speed, team) %>%
                            do(augment(loess(value~variable, .))) %>%
                            filter(variable == max(variable)) %>%
-                           filter(top_n(team, 10)),
+                           #filter(top_n(team, 10)),
                            aes(variable, .fitted), nudge_x = 100, inherit.aes = T) +
                 theme(legend.position="none")
 
@@ -483,8 +483,8 @@ mx1_prog$team <- as.factor(mx1_prog$team)
 #Whats the point of predicting who makes the final based on rank? obviously if you finish higher you have more chance to make finals
 #Good start - now make all heats and repecharges the same (ie H instead of H1, H2 etc) then order the rounds
 #Something with a 'starts with 'H'' type argument would be better but couldnt find. Dont like grep functions - too hard to read. 
-mx1_prog[grep('H', mx1_prog$round), 4] <- 'H'
-mx1_prog[grep('R', mx1_prog$round), 4] <- 'R'
+mx1_prog[grep('H', mx1_prog$round), 3] <- 'H'
+mx1_prog[grep('R', mx1_prog$round), 3] <- 'R'
 #Order the rounds from earliest to latest
 mx1_prog$round <- ordered(mx1_prog$round, levels = c('H', 'R', 'Q4', 'Q3', 'Q2', 'Q1', 'SE/F/G 3', 'SE/F/G 2', 
                                                        'SE/F/G 1','SE/F 1','SE/F 2', 'SC/D 2', 'SC/D 1', 'SA/B 2', 'SA/B 1', 'FG', 
@@ -551,3 +551,142 @@ r_2010 <- mss_rank %>%
         filter(year %in% '2010') %>%
         select(team, round, rank_final, year) %>%
         arrange(team)
+
+####Model attempt 2####
+#Predict split 2 from split 1 for an athlete
+#This athlete has 20 races to draw from
+#Data set-up: need a row for each split value so spread the original dataset
+synek_spt_pred <- spread(synek, key = variable, value = value)
+#make lm model
+synek_1.2_lm <- lm(split_2_time ~ split_1_time, synek_spt_pred)
+synek_2.3_lm <- lm(split_3_time ~ split_2_time, synek_spt_pred)
+synek_3.4_lm <- lm(split_4_time ~ split_3_time, synek_spt_pred)
+#Predict time at split 2 from given split 1 - predict needs a dataframe specifying the predictor variable name for new data argument
+predict(synek_1.2_lm, newdata = data.frame(split_1_time = 100))
+
+#viz of mod 1
+ggplot(synek_spt_pred, aes(split_1_time, split_2_time, colour = round_type)) +
+        geom_point(size = 4) +
+        geom_smooth(aes(split_1_time, split_2_time), method = lm, inherit.aes = FALSE)
+
+#viz of mod 2
+ggplot(synek_spt_pred, aes(split_2_time, split_3_time, colour = round_type)) +
+        geom_point(size = 4) +
+        geom_smooth(aes(split_2_time, split_3_time), method = lm, inherit.aes = FALSE)
+
+#viz of mod 3
+ggplot(synek_spt_pred, aes(split_3_time, split_4_time, colour = round_type)) +
+        geom_point(size = 4) +
+        geom_smooth(aes(split_3_time, split_4_time), method = lm, inherit.aes = FALSE)
+
+#Multiple lm
+synek_1.4_lm <- lm(split_4_time ~ split_1_time + split_2_time + split_3_time, synek_spt_pred) 
+synek_1.3_lm <- lm(split_3_time ~ split_1_time + split_2_time, synek_spt_pred) 
+#Take away: using the 1.3 model, need to feed it inputs at split 1 and split 2 kind of defeating the purpose, 
+#want the model to predict time at s2 from s1 then s3 from s2 which is achieved as follows: 
+predict(synek_2.3_lm, newdata = data.frame(split_2_time = 
+                                                   predict(synek_1.2_lm, newdata = data.frame(split_1_time = 100))))
+
+fournier <- data_melt %>% filter(bow_name == 'FOURNIER RODRIGUEZ Angel') %>%
+        filter(variable == 'split_1_time' | variable == 'split_2_time' | variable == 'split_3_time' | variable == 'split_4_time')
+fournier_spt_pred <- spread(fournier, key = variable, value = value)
+
+fournier_1.2_lm <- lm(split_2_time ~ split_1_time, fournier_spt_pred)
+fournier_2.3_lm <- lm(split_3_time ~ split_2_time, fournier_spt_pred)
+fournier_3.4_lm <- lm(split_4_time ~ split_3_time, fournier_spt_pred)
+
+fournier_1.3_lm <- lm(split_3_time ~ split_1_time + split_2_time, fournier_spt_pred)
+
+ggplot(fournier_spt_pred, aes(split_1_time, split_2_time, colour = year)) +
+        geom_point(size = 4) +
+        geom_smooth(aes(split_1_time, split_2_time), method = lm, inherit.aes = FALSE)
+
+#viz of mod 2
+ggplot(fournier_spt_pred, aes(split_3_time, split_4_time, colour = year)) +
+        geom_point(size = 4) +
+        geom_smooth(aes(split_3_time, split_4_time), method = lm, inherit.aes = FALSE)
+
+predict(fournier_2.3_lm, newdata = data.frame(split_2_time = 
+                                                   predict(fournier_1.2_lm, newdata = data.frame(split_1_time = 98))))
+
+#Try to improve by adding variables
+#Adding round and year had the best results but probably over fitting since there are only 1 example for each round mostly. 
+#Remove the heat/ semi number and it may make it more generalisable but probably more complext than it needs to be.
+summary(lm(split_2_time ~ split_1_time + round_type, fournier_spt_pred))
+summary(lm(split_3_time ~ split_2_time + round_type, fournier_spt_pred))
+
+#Next thing im going to do is try plotting the seperate model lines on the same plot. then plot the average line and an individuals line to show if they are better or worse than average
+synek1.2_line <- coef(synek_1.2_lm)
+synek2.3_line <- coef(synek_2.3_lm)
+fournier1.2_line <- coef(fournier_1.2_lm)
+fournier2.3_line <- coef(fournier_2.3_lm)
+
+#manual colour for legend
+cols = c('Fournier' = '#F78181', 'Synek' = '#04B4AE')
+
+
+plot_13 <- ggplot(data = mss, aes(split_1_time, split_2_time)) +
+        geom_point(aes(split_1_time, split_2_time), alpha = 0.2, inherit.aes = FALSE) +
+        geom_point(aes(split_1_time, split_2_time), alpha = 0.2, inherit.aes = FALSE) + 
+        geom_point(data = synek_spt_pred, aes(colour = 'Synek'), size = 2) +
+        geom_point(data = fournier_spt_pred, aes(colour = 'Fournier'), size = 2) +
+        geom_abline(slope = synek1.2_line[[2]], intercept = synek1.2_line[[1]], colour = '#04B4AE', size = 1) +
+        geom_abline(slope = fournier1.2_line[[2]], intercept = fournier1.2_line[[1]], colour = '#F78181', size = 1)
+
+row_mod_plotly <- ggplotly(plot_13)
+api_create(row_mod_plotly, filename = "row_mod_plotly")
+#interesting plot - suggests fournier is a slow starter? His line is flatter so at slower s1 runs, it has less effect on his s2 time
+#but synek tends to be faster in general with more runs at <100 s1. Synek line influenced by an outlier too. 
+#so if Fournier goes 102.5 at s1 he will be faster than synek at s2 if synek also went 102.5 but thats unlikely. 
+#still only s1 and s2. the outlier for synek was a slow race for everyone by the looks and synek ended up beating fournier despite being 4 seconds behind at s2
+#where the line crosses is of note - < 100 synek faster, > 100 Fournier faster. but need to know what is realistic. main point is Fournier is quick between s1 and s2
+
+#This plot shows the same but with an average line added from all data
+mss_s2.s3_plot <- ggplot(data = mss, aes(split_2_time, split_3_time, group = year, text = paste('round type:', round_type))) +
+        geom_point(alpha = 0.2) +
+        geom_point(data = synek_spt_pred, aes(colour = 'Synek'), size = 3) +
+        geom_point(data = fournier_spt_pred, aes(colour = 'Fournier'), size = 3) +
+        geom_smooth(aes(split_2_time, split_3_time), method = lm, se = F, inherit.aes = FALSE) #+
+        # geom_abline(slope = synek2.3_line[[2]], intercept = synek2.3_line[[1]], colour = '#04B4AE') +
+        # geom_abline(slope = fournier2.3_line[[2]], intercept = fournier2.3_line[[1]], colour = '#F78181')
+       
+ggplotly(mss_s2.s3_plot)
+        
+#points below the avg line are faster than average
+#Move on, spent enough time on this. 
+
+#s1 by s4, not a great plot, hard to interpret. 
+ggplot(mss, aes(split_1_time, split_4_time)) +
+        geom_point(alpha = 0.3) +
+        geom_smooth(method = lm)
+
+#Probably a story here about identifying rowers who perform better or worse than average. 
+#below line means they got to the 1500m mark faster than average based on 1000m time.
+#lower on the line show overall speed through the race. ie being below the line is less important the further you get from the fast times. 
+#having interactivity that lets you hover on the point to see rower, year and round would be good. Pretty much got this but not perfect
+
+####classification model on ranks####
+rank_pred_data <- mss %>% select(team, rank_final, split_4_time, round, bow_name, bow_birthday, row_id, year)
+rank_pred_2010 <- filter(rank_pred_data, year == '2010')
+rank_pred_2010[grep('H', rank_pred_2010$round), 4] <- 'H'
+rank_pred_2010[grep('R', rank_pred_2010$round), 4] <- 'R'
+rank_pred_2010[grep('SC', rank_pred_2010$round), 4] <- 'SC/D'
+rank_pred_2010[grep('SA', rank_pred_2010$round), 4] <- 'SA/B'
+rank_pred_2010$rank_overall <- 0
+#Order the rounds from earliest to latest
+rank_pred_2010$round <- as.factor(rank_pred_2010$round)
+rank_pred_2010$round <- ordered(rank_pred_2010$round, levels = c('H', 'R', 'Q4', 'Q3', 'Q2', 'Q1', 'SE/F/G 3', 'SE/F/G 2', 
+                                                                 'SE/F/G 1','SE/F 1','SE/F 2', 'SC/D 2', 'SC/D 1', 'SA/B 2', 'SA/B 1', 'FG', 
+                                                                 'FF', 'FE', 'FD', 'FC', 'FB', 'FA'))
+rank_pred_2010 <- arrange(rank_pred_2010, round, split_4_time)
+
+
+#Previous attempt to predict final rank based on heat rank just doesnt work
+#Now will try to predict performance based of past performances
+#So could get 1 rowers performances and get an overall rank (time based from all heats, semis etc) - might hit the same problem
+#Maybe just look at the rowers final finishing place overall from the final rounds. 
+#Filter all F_ races and rank from 1:n based on time. 
+#Want to find if that rank from 2010 can predict 2011 finishing position. So column will need to be (see notebook)
+
+
+
