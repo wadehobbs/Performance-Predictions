@@ -651,6 +651,12 @@ mss_s2.s3_plot <- ggplot(data = mss, aes(split_2_time, split_3_time, group = yea
         # geom_abline(slope = fournier2.3_line[[2]], intercept = fournier2.3_line[[1]], colour = '#F78181')
        
 ggplotly(mss_s2.s3_plot)
+#set up link to plotly site
+Sys.setenv("plotly_username"="analysingsport")
+Sys.setenv("plotly_api_key"="rwEGGQuAJbv2HnvN8r5y")
+#sends the plot to the site - does last plot or named plot
+api_create(row_mod_plotly, filename = "row_mod_plotly")
+
         
 #points below the avg line are faster than average
 #Move on, spent enough time on this. 
