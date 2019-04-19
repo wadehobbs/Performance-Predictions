@@ -1,0 +1,150 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+#Tennis predictions with tree-based models
+Data can be found here: https://datahub.io/sports-data/atp-world-tour-tennis-data
+First load the required packages
+```{r message = FALSE}
+#Load packages
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+```
+I fixed the data in excel - each row was a match with both players, and all the stats. Needed a row per athlete with corresponding stats. Im sure there is a way to do this in R but in the interests of time I just did some copy/paste in excel. The data file can be found here.
+```{r message = FALSE, warning = FALSE}
+#Import
+tennis_2017_results <- read_csv("match_stats_2017_unindexed_csv.csv")
+tennis_2017_results$Result <- as.factor(ifelse(tennis_2017_results$Result == 1, 'Won', 'Lost'))
+```
+Now each row contains an athlete, so a match is spread across two rows.
+I changed the 1 or 0 result to won or lost to make results easier to interpret. 
+To make predictions, I need an outcome variable - in this case it is the Result column. However, if there are other variables directly correlated to the outcome, these should be removed. Variables such as sets won, total points won etc will be higher for the winner in most or all matches, therefore not useful. The current data set has 'total point won', 'total points total', there will be removed. I want to use match stats to predict outcome, not actual results. 
+```{r}
+
+tennis_2017_results <- select(tennis_2017_results, -total_points_won, -total_points_total)
+tennis_men_2013 <- tennis_men_2013[complete.cases(tennis_men_2013), ]
+head(tennis_men_2013)
+```
+There are other potentially problematic variables like 'Total points won by player 1' (TPW1) but ill leave them in for now. Also had to remove any rows with NAs as some of the models used later do not deal well with them. This removed around 52 rows from the 730. 
+
+#Decision Tree
+First model is a decision tree with all variables included.
+```{r}
+tennis_dt <- rpart(Result ~ ., 
+                   data = tennis_men_2013[,2:14],
+                   method = 'class')
+rpart.plot(tennis_dt)
+```
+This result is saying the number of break points created is the most important statistic separating winners and losers in this data set with 73% of players winning when scoring greater than 3.5 'break points created'. From there, it appears that players who record > 3.5 'break points created' and > 2.5 'break points won' and >= 40 'unforced errors' win 91% of the time. This seems strange since making unforced errors is a negative statistic. This may just be a quirk in the small data set or a failing of the model, which at this point is quite simple and prone to overfitting. 
+
+To ensure we get less bias results we will try breaking the data into training and test sets. 
+
+```{r}
+set.seed(123) # set a random seed for reproducibility
+tennis_men_2013$id <- 1:nrow(tennis_men_2013) #Create id col
+train_set <- tennis_men_2013[,2:15] %>% sample_frac(.75)
+test_set  <- anti_join(tennis_men_2013[,2:15], train, by = 'id')
+
+#Rerun the model
+tennis_dt2 <- rpart(Result ~ ., 
+                   data = train_set,
+                   method = 'class')
+rpart.plot(tennis_dt2)
+
+```
+
+Looks similar. But now we can test the prediction error on the test data set to find out how well the model predicts winners and losers.
+
+```{r}
+tennis_pred <- predict(object = tennis_dt2, # model object 
+                            newdata = test_set, # test dataset
+                            type = "class")  # return classification labels
+
+library(caret)
+# calculate the confusion matrix for the test set
+confusionMatrix(data = tennis_pred,                # predicted classes
+                reference = test_set$Result)  # actual classes
+```
+
+The model correctly predicted a win 82% of the time (shown by specificity) and predicted a loss correctly 86% of the time (shown by sensitivity). Not bad. To try to improve we can play around with the model hyperparamaters. 
+
+```{r}
+#Auto tune with caret package
+tennis_dt3 <- train(Result ~ ., 
+                   data = train_set,
+                   method = 'rpart')
+
+tennis_pred3 <- predict(object = tennis_dt3,
+                        newdata = test_set)
+
+confusionMatrix(data = tennis_pred3, 
+                reference = test_set$Result)
+```
+Interestingly, performance slightly decreased with the caret package auto tuning model. 
+
+Time to ramp things up. Decision trees have known flaws related to overfitting and high variance. One way to overcomes these issues is to use a random forrest. 
+#Random Forests
+
+```{r}
+library(randomForest)
+
+tennis_rf <- randomForest(Result ~ ., 
+                   data = train_set)
+tennis_rf
+```
+
+In this case a loss was predicted correctly 82.6% of the time (shown here as the inverse - 17.4% error rate), and a win 86% of the time. Similar rates as the original decision tree. The out of bag error rate (OOB) was 15.55% - this is the error rate on samples not selected into the bootstrap training set. So no need for a training and test set, the funciton does this already, and the OOB error is the error rate on the 'test' set. Note, a big advantage of this is that you can use the entire dataset in the randomForest function as it uses cross validation to test accuracy. In this case it was trained on the training model so we can test accuracy on the test data. 
+
+```{r}
+tennis_pred4 <- predict(object = tennis_rf,  
+                            newdata = test_set,  
+                            type = "class")        
+
+confusionMatrix(data = tennis_pred4,          
+                      reference = test_set$Result) 
+
+```
+Now we can see the advantage of using a random forest, the prediction on the test set has increased dramatically. We can try tuning the model to see what improvement, if any, it can achieve. 
+
+This is done using TuneRF which allows us to train numerous models with different mtry values, minimising the OOB. Mtry adjusts the number of predictor variables randomly sampled as candidates at each split (adjusting the variability/randomness going into the model).
+
+```{r}
+tennis_tune <- tuneRF(x = train_set[, 3:14],
+              y = train_set$Result,
+              ntreeTry = 500)
+tennis_tune
+```
+
+```{r}
+#Get the final mtry value
+mtry_opt <- tennis_tune[,"mtry"][which.min(tennis_tune[,"OOBError"])]
+print(mtry_opt)
+```
+We can use this method to pick the best model (in this case, the one that uses an mtry value of 3) by selecting `doBest = TRUE` in `tuneRF()`. This will return the best model, instead of the results.
+
+An alternate (and more generalisable) method for tuning hyper-parameters is with the caret package. These methods can be used for various machine learning models, as long as you know the hyper-parameters to tune. For more info see this resource I used for this section: https://machinelearningmastery.com/tune-machine-learning-algorithms-in-r/
+
+```{r}
+control <- trainControl(method="repeatedcv", number=10, repeats=3, search="grid")
+rf_gridsearch <- train(Result~., data=train_set, method="rf", metric='Accuracy', tuneGrid=expand.grid(.mtry=c(1:10)), trControl=control)
+print(rf_gridsearch)
+plot(rf_gridsearch)
+```
+
+Using caret cross validation shows an mtry of 4 performs slightly better than 2 and 3 in accuracy. In this case it doesn't make a big difference as accuracy is only slightly improved. Note, this is a good process to go through, though the randomForest function uses reasonable defaults - for mtry the default for a classification tree is sqrt(p) where p is number of variables. The exact code is floor(sqrt(ncol(x))), which results in an mtry of 3 for our data. 
+
+
+The last type of model we will try is a boosted tree, specifically the gradient boosting machine (GBM). This is fairly easy to implement and if tuned corretly can perform better than just about any other model. 
+
+```{r}
+
+tennis_gbm <- gbm(formula = Result ~ ., 
+               distribution = "bernoulli",
+               data = train_set,
+               n.trees = 5000)
+```
+
+At this point we have a very accurate model for predicting the outcome of tennis matches from box score statistics. But what if we want to understand what statistics are most important to the prediction? 
+
+
